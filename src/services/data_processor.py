@@ -1,7 +1,9 @@
-import pandas as pd
+import csv
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Callable
 from threading import Lock
+from openpyxl import load_workbook, Workbook
 from src.utils.logger import get_logger
 from src.utils.cache import LocalCache
 from src.utils.validators import LinkedInValidator, DataValidator
@@ -17,32 +19,60 @@ class DataProcessor:
         self.lock = Lock()
         self.is_running = False
 
-    def load_spreadsheet(self, file_path: str) -> Optional[pd.DataFrame]:
+    def load_spreadsheet(self, file_path: str) -> Optional[List[Dict]]:
         try:
             file_path = Path(file_path)
 
             if file_path.suffix.lower() == '.csv':
-                df = pd.read_csv(file_path)
+                return self._load_csv(file_path)
             elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-                df = pd.read_excel(file_path)
+                return self._load_excel(file_path)
             else:
                 logger.error(f"Formato não suportado: {file_path.suffix}")
                 return None
-
-            df.columns = [col.lower().strip() for col in df.columns]
-            logger.info(f"Planilha carregada: {len(df)} linhas")
-            return df
 
         except Exception as e:
             logger.error(f"Erro ao carregar planilha: {e}")
             return None
 
+    def _load_csv(self, file_path: Path) -> Optional[List[Dict]]:
+        try:
+            data = []
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    normalized = {k.lower().strip(): v for k, v in row.items()}
+                    data.append(normalized)
+            logger.info(f"CSV carregado: {len(data)} linhas")
+            return data
+        except Exception as e:
+            logger.error(f"Erro ao carregar CSV: {e}")
+            return None
+
+    def _load_excel(self, file_path: Path) -> Optional[List[Dict]]:
+        try:
+            wb = load_workbook(file_path)
+            ws = wb.active
+            data = []
+            headers = [cell.value for cell in ws[1]]
+            headers = [str(h).lower().strip() if h else "" for h in headers]
+
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                row_dict = {headers[i]: row[i] for i in range(len(headers)) if i < len(row)}
+                data.append(row_dict)
+
+            logger.info(f"Excel carregado: {len(data)} linhas")
+            return data
+        except Exception as e:
+            logger.error(f"Erro ao carregar Excel: {e}")
+            return None
+
     def enrich_contacts(
         self,
-        df: pd.DataFrame,
+        data: List[Dict],
         progress_callback: Optional[Callable] = None,
         status_callback: Optional[Callable] = None,
-    ) -> pd.DataFrame:
+    ) -> List[Dict]:
         try:
             self.is_running = True
             output_columns = [
@@ -54,29 +84,31 @@ class DataProcessor:
                 'observacoes',
             ]
 
-            for col in output_columns:
-                if col not in df.columns:
-                    df[col] = ""
+            enriched_data = []
+            total = len(data)
 
-            total = len(df)
-
-            for idx, row in df.iterrows():
+            for idx, row in enumerate(data):
                 if not self.is_running:
                     logger.info("Processamento interrompido pelo usuário")
                     break
 
                 try:
+                    enriched_row = {**row}
                     result = self._process_contact(row)
-                    for key, value in result.items():
-                        df.at[idx, key] = value
+                    enriched_row.update(result)
+                    enriched_data.append(enriched_row)
 
                     if status_callback:
                         status_callback(f"Processado: {row.get('nome', 'N/A')}")
 
                 except Exception as e:
                     logger.error(f"Erro ao processar contato {idx}: {e}")
-                    df.at[idx, 'status_busca'] = 'erro'
-                    df.at[idx, 'observacoes'] = str(e)
+                    enriched_row = {**row}
+                    enriched_row.update({
+                        'status_busca': 'erro',
+                        'observacoes': str(e),
+                    })
+                    enriched_data.append(enriched_row)
 
                 finally:
                     if progress_callback:
@@ -84,12 +116,12 @@ class DataProcessor:
 
             self.is_running = False
             logger.info("Enriquecimento concluído")
-            return df
+            return enriched_data
 
         except Exception as e:
             logger.error(f"Erro no enriquecimento: {e}")
             self.is_running = False
-            return df
+            return data
 
     def _process_contact(self, row: Dict) -> Dict:
         result = {
@@ -236,19 +268,61 @@ class DataProcessor:
         self.is_running = False
         logger.info("Parada de processamento solicitada")
 
-    def export_spreadsheet(self, df: pd.DataFrame, output_path: str) -> bool:
+    def export_spreadsheet(self, data: List[Dict], output_path: str) -> bool:
         try:
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             if output_path.suffix.lower() == '.csv':
-                df.to_csv(output_path, index=False, encoding='utf-8')
+                return self._export_csv(data, output_path)
+            elif output_path.suffix.lower() in ['.xlsx', '.xls']:
+                return self._export_excel(data, output_path)
             else:
-                df.to_excel(output_path, index=False, engine='openpyxl')
-
-            logger.info(f"Planilha exportada: {output_path}")
-            return True
+                logger.error(f"Formato não suportado: {output_path.suffix}")
+                return False
 
         except Exception as e:
             logger.error(f"Erro ao exportar planilha: {e}")
+            return False
+
+    def _export_csv(self, data: List[Dict], output_path: Path) -> bool:
+        try:
+            if not data:
+                logger.warning("Nenhum dado para exportar")
+                return False
+
+            fieldnames = list(data[0].keys()) if data else []
+
+            with open(output_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(data)
+
+            logger.info(f"CSV exportado: {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao exportar CSV: {e}")
+            return False
+
+    def _export_excel(self, data: List[Dict], output_path: Path) -> bool:
+        try:
+            if not data:
+                logger.warning("Nenhum dado para exportar")
+                return False
+
+            wb = Workbook()
+            ws = wb.active
+            fieldnames = list(data[0].keys())
+
+            ws.append(fieldnames)
+
+            for row_data in data:
+                row = [row_data.get(field, "") for field in fieldnames]
+                ws.append(row)
+
+            wb.save(output_path)
+            logger.info(f"Excel exportado: {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao exportar Excel: {e}")
             return False

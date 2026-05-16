@@ -44,23 +44,24 @@ def enrich():
 
         logger.info(f"Processando arquivo: {filename}")
 
-        df = processor.load_spreadsheet(str(file_path))
-        if df is None:
+        data = processor.load_spreadsheet(str(file_path))
+        if data is None:
             return jsonify({'error': 'Erro ao carregar arquivo'}), 400
 
-        df_enriched = processor.enrich_contacts(df)
+        data_enriched = processor.enrich_contacts(data)
 
         output_path = app.config['UPLOAD_FOLDER'] / f"enriched_{filename}"
-        success = processor.export_spreadsheet(df_enriched, str(output_path))
+        success = processor.export_spreadsheet(data_enriched, str(output_path))
 
         if not success:
             return jsonify({'error': 'Erro ao exportar resultado'}), 500
 
+        found = len([r for r in data_enriched if r.get('status_busca') == 'encontrado'])
         return jsonify({
             'status': 'success',
-            'total': len(df_enriched),
-            'found': len(df_enriched[df_enriched['status_busca'] == 'encontrado']),
-            'success_rate': f"{len(df_enriched[df_enriched['status_busca'] == 'encontrado']) / len(df_enriched) * 100:.1f}%",
+            'total': len(data_enriched),
+            'found': found,
+            'success_rate': f"{found / len(data_enriched) * 100:.1f}%" if data_enriched else "0%",
             'output_file': output_path.name,
         })
 

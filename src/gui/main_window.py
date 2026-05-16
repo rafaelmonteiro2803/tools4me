@@ -2,8 +2,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 import threading
-from typing import Optional
-import pandas as pd
+from typing import Optional, List, Dict
 from CTkMessagebox import CTkMessagebox
 
 from src.utils.logger import get_logger
@@ -24,7 +23,7 @@ class LinkedInEnrichmentApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.processor = DataProcessor()
-        self.current_df: Optional[pd.DataFrame] = None
+        self.current_data: Optional[List[Dict]] = None
         self.processing_thread: Optional[threading.Thread] = None
 
         self._setup_ui()
@@ -278,9 +277,9 @@ class LinkedInEnrichmentApp(ctk.CTk):
         if not file_path:
             return
 
-        self.current_df = self.processor.load_spreadsheet(file_path)
+        self.current_data = self.processor.load_spreadsheet(file_path)
 
-        if self.current_df is not None:
+        if self.current_data is not None:
             self.file_path_var.set(f"Carregado: {Path(file_path).name}")
             self._update_preview()
             self._log("✓ Arquivo carregado com sucesso")
@@ -288,16 +287,19 @@ class LinkedInEnrichmentApp(ctk.CTk):
             messagebox.showerror("Erro", "Não foi possível carregar o arquivo")
 
     def _update_preview(self) -> None:
-        if self.current_df is None:
+        if self.current_data is None:
             return
 
         self.preview_text.configure(state="normal")
         self.preview_text.delete("1.0", "end")
 
-        info = f"Total de contatos: {len(self.current_df)}\n"
-        info += f"Colunas: {', '.join(self.current_df.columns)}\n\n"
+        info = f"Total de contatos: {len(self.current_data)}\n"
+        info += f"Colunas: {', '.join(self.current_data[0].keys()) if self.current_data else 'N/A'}\n\n"
         info += "Primeiras 5 linhas:\n"
-        info += self.current_df.head().to_string()
+        for idx, row in enumerate(self.current_data[:5]):
+            info += f"\nLinha {idx + 1}:\n"
+            for key, value in row.items():
+                info += f"  {key}: {value}\n"
 
         self.preview_text.insert("1.0", info)
         self.preview_text.configure(state="disabled")
@@ -310,7 +312,7 @@ class LinkedInEnrichmentApp(ctk.CTk):
         self.update()
 
     def _start_enrichment(self) -> None:
-        if self.current_df is None:
+        if self.current_data is None:
             messagebox.showwarning("Aviso", "Carregue um arquivo primeiro")
             return
 
@@ -330,8 +332,8 @@ class LinkedInEnrichmentApp(ctk.CTk):
 
     def _process_data(self) -> None:
         try:
-            self.current_df = self.processor.enrich_contacts(
-                self.current_df,
+            self.current_data = self.processor.enrich_contacts(
+                self.current_data,
                 progress_callback=lambda p: self._update_progress(p),
                 status_callback=lambda s: self._log(s),
             )
@@ -341,7 +343,7 @@ class LinkedInEnrichmentApp(ctk.CTk):
             self.export_button.configure(state="normal")
 
             self._log("✓ Enriquecimento concluído!")
-            self._log(f"Resumo: {len(self.current_df)} contatos processados")
+            self._log(f"Resumo: {len(self.current_data)} contatos processados")
 
         except Exception as e:
             logger.error(f"Erro no processamento: {e}")
@@ -361,7 +363,7 @@ class LinkedInEnrichmentApp(ctk.CTk):
         self.start_button.configure(state="normal")
 
     def _export_results(self) -> None:
-        if self.current_df is None:
+        if self.current_data is None:
             messagebox.showwarning("Aviso", "Nenhum dado para exportar")
             return
 
@@ -374,7 +376,7 @@ class LinkedInEnrichmentApp(ctk.CTk):
         if not file_path:
             return
 
-        success = self.processor.export_spreadsheet(self.current_df, file_path)
+        success = self.processor.export_spreadsheet(self.current_data, file_path)
 
         if success:
             messagebox.showinfo("Sucesso", f"Arquivo exportado: {Path(file_path).name}")
