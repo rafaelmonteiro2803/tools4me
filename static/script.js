@@ -56,8 +56,8 @@ async function showPreview() {
             data = await readXLSX(selectedFile);
         }
 
-        if (data.length === 0) {
-            showToast('❌ Arquivo vazio', 'error');
+        if (!data || data.length === 0) {
+            showToast('⚠️ Arquivo carregado, mas vazio ou sem dados', 'warning');
             return;
         }
 
@@ -95,8 +95,28 @@ async function showPreview() {
         previewSection.style.display = 'block';
         showToast('✓ Arquivo carregado com sucesso', 'success');
     } catch (error) {
-        showToast(`❌ Erro ao ler arquivo: ${error.message}`, 'error');
+        showToast(`⚠️ Arquivo selecionado, mas preview indisponível: ${error.message}`, 'warning');
     }
+}
+
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let insideQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+            insideQuotes = !insideQuotes;
+        } else if (char === ',' && !insideQuotes) {
+            result.push(current.trim().replace(/^"|"$/g, ''));
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    result.push(current.trim().replace(/^"|"$/g, ''));
+    return result;
 }
 
 function readCSV(file) {
@@ -106,13 +126,17 @@ function readCSV(file) {
             try {
                 const text = e.target.result;
                 const lines = text.split('\n').filter(l => l.trim());
-                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                if (lines.length < 1) {
+                    resolve([]);
+                    return;
+                }
 
+                const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase());
                 const data = lines.slice(1).map(line => {
-                    const values = line.split(',');
+                    const values = parseCSVLine(line);
                     const obj = {};
                     headers.forEach((h, i) => {
-                        obj[h] = values[i] ? values[i].trim() : '';
+                        obj[h] = values[i] ? values[i] : '';
                     });
                     return obj;
                 });
@@ -132,9 +156,21 @@ function readXLSX(file) {
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                // Simple XLSX parsing (would need SheetJS library for production)
-                showToast('⚠️ Preview de XLSX pode ser limitado', 'warning');
-                resolve([]);
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheet];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                const normalized = jsonData.map(row => {
+                    const obj = {};
+                    Object.keys(row).forEach(key => {
+                        obj[key.toLowerCase()] = String(row[key] || '');
+                    });
+                    return obj;
+                });
+
+                resolve(normalized);
             } catch (error) {
                 reject(error);
             }
