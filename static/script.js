@@ -4,99 +4,47 @@ let selectedFile = null;
 let isProcessing = false;
 let enrichedData = null;
 
-// DOM Elements
-const fileInput = document.getElementById('fileInput');
-const fileLabel = document.querySelector('.file-label');
-const fileName = document.getElementById('fileName');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const downloadBtn = document.getElementById('downloadBtn');
-const clearBtn = document.getElementById('clearBtn');
+// DOM Elements - will be initialized on DOMContentLoaded
+let fileInput, fileLabel, fileName, startBtn, stopBtn, downloadBtn, clearBtn;
+let previewSection, progressSection, logsSection, resultsSection;
+let progressFill, progressPercent, statusText, logsContent;
+let toast;
 
-const previewSection = document.getElementById('previewSection');
-const progressSection = document.getElementById('progressSection');
-const logsSection = document.getElementById('logsSection');
-const resultsSection = document.getElementById('resultsSection');
+function initializeDOMElements() {
+    fileInput = document.getElementById('fileInput');
+    fileLabel = document.querySelector('.file-label');
+    fileName = document.getElementById('fileName');
+    startBtn = document.getElementById('startBtn');
+    stopBtn = document.getElementById('stopBtn');
+    downloadBtn = document.getElementById('downloadBtn');
+    clearBtn = document.getElementById('clearBtn');
 
-const progressFill = document.getElementById('progressFill');
-const progressPercent = document.getElementById('progressPercent');
-const statusText = document.getElementById('statusText');
-const logsContent = document.getElementById('logsContent');
+    previewSection = document.getElementById('previewSection');
+    progressSection = document.getElementById('progressSection');
+    logsSection = document.getElementById('logsSection');
+    resultsSection = document.getElementById('resultsSection');
 
-const toast = document.getElementById('toast');
+    progressFill = document.getElementById('progressFill');
+    progressPercent = document.getElementById('progressPercent');
+    statusText = document.getElementById('statusText');
+    logsContent = document.getElementById('logsContent');
 
-// File Input Handler
-fileInput.addEventListener('change', handleFileSelect);
+    toast = document.getElementById('toast');
 
-async function handleFileSelect(e) {
-    selectedFile = e.target.files[0];
-    if (!selectedFile) return;
+    // Attach event listeners
+    fileInput.addEventListener('change', handleFileSelect);
+    startBtn.addEventListener('click', startProcessing);
+    stopBtn.addEventListener('click', () => {
+        isProcessing = false;
+        addLog('⏹ Processamento interrompido');
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+    });
+    downloadBtn.addEventListener('click', downloadResults);
+    clearBtn.addEventListener('click', clearCache);
 
-    // Validate file
-    const validTypes = ['text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-    if (!validTypes.includes(selectedFile.type) && !selectedFile.name.endsWith('.csv') && !selectedFile.name.endsWith('.xlsx')) {
-        showToast('❌ Arquivo inválido. Use CSV ou XLSX', 'error');
-        return;
-    }
-
-    fileName.textContent = `✓ Arquivo: ${selectedFile.name}`;
-    startBtn.disabled = false;
-
-    // Show preview
-    await showPreview();
-}
-
-async function showPreview() {
-    try {
-        // Read CSV/XLSX file
-        let data = [];
-        if (selectedFile.name.endsWith('.csv')) {
-            data = await readCSV(selectedFile);
-        } else {
-            data = await readXLSX(selectedFile);
-        }
-
-        if (!data || data.length === 0) {
-            showToast('⚠️ Arquivo carregado, mas vazio ou sem dados', 'warning');
-            return;
-        }
-
-        // Update preview
-        document.getElementById('totalContacts').textContent = data.length;
-        const columns = Object.keys(data[0]).length;
-        document.getElementById('totalColumns').textContent = columns;
-
-        // Create table
-        const tableHead = document.getElementById('tableHead');
-        const tableBody = document.getElementById('tableBody');
-        tableHead.innerHTML = '';
-        tableBody.innerHTML = '';
-
-        // Header
-        const headerRow = document.createElement('tr');
-        Object.keys(data[0]).forEach(col => {
-            const th = document.createElement('th');
-            th.textContent = col;
-            headerRow.appendChild(th);
-        });
-        tableHead.appendChild(headerRow);
-
-        // First 5 rows
-        data.slice(0, 5).forEach(row => {
-            const tr = document.createElement('tr');
-            Object.values(row).forEach(cell => {
-                const td = document.createElement('td');
-                td.textContent = cell || '-';
-                tr.appendChild(td);
-            });
-            tableBody.appendChild(tr);
-        });
-
-        previewSection.style.display = 'block';
-        showToast('✓ Arquivo carregado com sucesso', 'success');
-    } catch (error) {
-        showToast(`⚠️ Arquivo selecionado, mas preview indisponível: ${error.message}`, 'warning');
-    }
+    console.log('✓ Elementos DOM inicializados');
+    console.log('✓ startBtn:', startBtn);
 }
 
 function parseCSVLine(line) {
@@ -180,9 +128,83 @@ function readXLSX(file) {
     });
 }
 
-// Start Processing
-startBtn.addEventListener('click', startProcessing);
+async function handleFileSelect(e) {
+    selectedFile = e.target.files[0];
+    if (!selectedFile) return;
 
+    // Validate file
+    const validTypes = ['text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+    if (!validTypes.includes(selectedFile.type) && !selectedFile.name.endsWith('.csv') && !selectedFile.name.endsWith('.xlsx')) {
+        showToast('❌ Arquivo inválido. Use CSV ou XLSX', 'error');
+        selectedFile = null;
+        return;
+    }
+
+    fileName.textContent = `✓ Arquivo: ${selectedFile.name}`;
+
+    // Enable button regardless of preview result
+    startBtn.disabled = false;
+    startBtn.removeAttribute('disabled');
+    console.log('✓ Arquivo selecionado, botão habilitado:', selectedFile.name);
+
+    // Show preview
+    await showPreview();
+}
+
+async function showPreview() {
+    try {
+        // Read CSV/XLSX file
+        let data = [];
+        if (selectedFile.name.endsWith('.csv')) {
+            data = await readCSV(selectedFile);
+        } else {
+            data = await readXLSX(selectedFile);
+        }
+
+        if (!data || data.length === 0) {
+            showToast('⚠️ Arquivo carregado, mas vazio ou sem dados', 'warning');
+            return;
+        }
+
+        // Update preview
+        document.getElementById('totalContacts').textContent = data.length;
+        const columns = Object.keys(data[0]).length;
+        document.getElementById('totalColumns').textContent = columns;
+
+        // Create table
+        const tableHead = document.getElementById('tableHead');
+        const tableBody = document.getElementById('tableBody');
+        tableHead.innerHTML = '';
+        tableBody.innerHTML = '';
+
+        // Header
+        const headerRow = document.createElement('tr');
+        Object.keys(data[0]).forEach(col => {
+            const th = document.createElement('th');
+            th.textContent = col;
+            headerRow.appendChild(th);
+        });
+        tableHead.appendChild(headerRow);
+
+        // First 5 rows
+        data.slice(0, 5).forEach(row => {
+            const tr = document.createElement('tr');
+            Object.values(row).forEach(cell => {
+                const td = document.createElement('td');
+                td.textContent = cell || '-';
+                tr.appendChild(td);
+            });
+            tableBody.appendChild(tr);
+        });
+
+        previewSection.style.display = 'block';
+        showToast('✓ Arquivo carregado com sucesso', 'success');
+    } catch (error) {
+        showToast(`⚠️ Arquivo selecionado, mas preview indisponível: ${error.message}`, 'warning');
+    }
+}
+
+// Start Processing
 async function startProcessing() {
     if (!selectedFile) {
         showToast('❌ Selecione um arquivo', 'error');
@@ -243,14 +265,6 @@ async function startProcessing() {
     updateProgress(100);
 }
 
-// Stop Processing
-stopBtn.addEventListener('click', () => {
-    isProcessing = false;
-    addLog('⏹ Processamento interrompido');
-    stopBtn.disabled = true;
-    startBtn.disabled = false;
-});
-
 // Show Results
 function showResults(result) {
     document.getElementById('resultTotal').textContent = result.total;
@@ -263,7 +277,7 @@ function showResults(result) {
 }
 
 // Download Results
-downloadBtn.addEventListener('click', async () => {
+async function downloadResults() {
     if (!enrichedData) return;
 
     try {
@@ -283,10 +297,10 @@ downloadBtn.addEventListener('click', async () => {
     } catch (error) {
         showToast(`❌ Erro: ${error.message}`, 'error');
     }
-});
+}
 
 // Clear Cache
-clearBtn.addEventListener('click', async () => {
+async function clearCache() {
     if (!confirm('Tem certeza que deseja limpar o cache?')) return;
 
     try {
@@ -303,7 +317,7 @@ clearBtn.addEventListener('click', async () => {
     } catch (error) {
         showToast(`❌ Erro: ${error.message}`, 'error');
     }
-});
+}
 
 // Update Progress
 function updateProgress(percent) {
@@ -359,11 +373,14 @@ async function healthCheck() {
     }
 }
 
-// Initialize
+// Initialize on DOMContentLoaded
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('✓ DOM Carregado');
+
+    // Initialize DOM elements and attach listeners
+    initializeDOMElements();
+
+    // Check health and cache
     healthCheck();
     updateCacheStats();
-
-    // Simulate progress for demo
-    let simulatedProgress = 0;
 });
